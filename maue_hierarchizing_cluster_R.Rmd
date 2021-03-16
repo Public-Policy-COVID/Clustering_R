@@ -1,0 +1,274 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  word_document: default
+---
+
+ For this analysis, we will be clustering observations based on COVID-19 deaths, as well as similar health and demographic characteristics. We will be doing both agglomerative hierchical clustering, which determines the number of clusters from individual groups, as well as divisive clustering, which determines the number of clusters after starting from one large cluster that contains all observations. I will also compare the results of both types of clustering visually. The unit of analysis here is the county. 
+
+Reading in data
+```{r}
+link='https://github.com/Public-Policy-COVID/students_merge/raw/main/Merged_data.csv'
+
+myfile=url(link)
+
+covid=read.csv(file=myfile)
+```
+
+
+Reset row names to R format
+```{r}
+row.names(covid)=NULL
+
+str(covid,width = 50,strict.width='cut')
+```
+
+VARIABLE PREPARATION
+
+First, we want to include the variable for COVID deaths in the cluster analysis, but it is currently a string variable. We will need to change to numeric
+
+```{r}
+as.numeric('Deaths_COVID')
+```
+
+Now, we will choose the variables to cluster around COVID deaths. We will include total population, mask score, the number of hospital beds, the total percent of the population that is white, and the total percent of the population that is black. Although we only have total deaths and not deaths per 100K, clustering around total population should help control for variation due to population. 
+```{r}
+dfClus=covid[c('Number_of_beds','mask_score','Deaths_COVID','Deaths_total','Number_of_hospitals', 'black_total_pct','white_total_pct')]
+
+summary(dfClus)
+```
+
+
+Rescale the units into a new variable
+```{r}
+dfClus=scale(dfClus)
+
+summary(dfClus)
+```
+
+We will set Location as the row names, which will allow us to look at cluster results for each county. 
+```{r}
+row.names(dfClus)=covid$Location
+head(dfClus)
+
+set.seed(999) ##This is for replicability of results
+
+```
+
+Determine the sitance method and compute distance matrix
+```{r}
+library(cluster)
+dfClus_D=cluster::daisy(x=dfClus)
+```
+
+
+HIERARCHIZING AGGLOMERATIVE
+
+Set the number of clusters
+```{r}
+NumCluster=4
+```
+
+Next, apply the function:
+```{r}
+library(factoextra)
+
+res.agnes= hcut(dfClus_D, 
+                k = NumCluster,isdiss=T,
+                hc_func='agnes',
+                hc_method = "ward.D2")
+```
+
+Cluster:
+```{r}
+covid$agn=as.factor(res.agnes$cluster)
+```
+Let's check the first cluster results
+```{r}
+covid[covid$agn==1,'Location']
+
+```
+Let's check the results through a table
+```{r}
+table(covid$agn)
+```
+The results indicate that Cluster 4 has only one observation. 
+
+```{r}
+covid[covid$agn==4,'Location']
+```
+Los Angeles County appears to be the sole observation.
+
+King County's cluster:
+```{r}
+covid[covid$Location=="King_WA",'agn']
+```
+
+
+
+VISUALIZING AGGLOMERATIVE RESULTS
+
+We will produce a dendrogram of the cluster results
+```{r}
+fviz_dend(res.agnes,k=NumCluster, cex = 0.7, horiz = T)
+```
+
+Visualize results with a silhouette plot
+```{r}
+library(factoextra)
+fviz_silhouette(res.agnes)
+```
+It appears that clusters 1,2, and 3 each have negative silhouettes, which means these are poorly clustered
+
+
+Saving individual silhouettes:
+```{r}
+agnEval=data.frame(res.agnes$silinfo$widths)
+head(agnEval)
+
+```
+
+Check the observations with negative silhouettes
+```{r}
+agnEval[agnEval$sil_width<0,]
+```
+In total, there are nine observations that are poorly clustered: One in cluster 1, Seven in Cluster 2, and One in Cluster 3
+
+
+HIERARCHIZING DIVISIVE METHOD
+
+Apply the function (we will use the same number of clusters, 4, as the agglomerative method)
+```{r}
+library(factoextra)
+
+res.diana= hcut(dfClus_D, k = NumCluster,
+                 hc_func='diana',
+                 hc_method = "ward.D")
+
+```
+
+Clustering 
+```{r}
+covid$dia=as.factor(res.diana$cluster)
+```
+
+Querying the data frame
+```{r}
+covid[covid$dia==1, 'Location']
+```
+
+Check the results by each cluster:
+```{r}
+table(covid$dia)
+```
+
+
+The results indicate that Cluster 2 has the large majority of observations. Let's check that one:
+```{r}
+covid[covid$dia==2, 'Location']
+```
+
+Let's check King County:
+```{r}
+covid[covid$Location=="King_WA" , 'dia']
+```
+
+
+Produce silhouettes to visualize results and report average silhouettes
+```{r}
+library(factoextra)
+fviz_silhouette(res.diana)
+```
+Cluster 2 has a negative silhouette, meaning it is poorly clustered. 
+
+
+Next we will save silhouettes
+```{r}
+diaEval=data.frame(res.diana$silinfo$widths)
+head(diaEval)
+
+```
+
+Let's check the poorly clustered silhouette in Cluster 2
+```{r}
+diaEval[diaEval$sil_width<0,]
+```
+It looks like Multnomah County is the poorly clustered result
+
+
+
+COMPARING AGGLOMERATIVE AND DIVISIVE CLUSTERS
+
+
+Prepre a bidimensional map
+```{r}
+projectedData = cmdscale(dfClus_D, k=2)
+```
+
+Save coordinates to original data frame
+```{r}
+covid$dim1 = projectedData[,1]
+covid$dim2 = projectedData[,2]
+```
+
+Map the Clusters
+```{r}
+base= ggplot(data=covid,
+             aes(x=dim1, y=dim2,
+                 label=Location)) 
+base + geom_text(size=2)
+```
+
+
+Plot the Agglomerative Results
+```{r}
+
+agnPlot=base + labs(title = "AGNES") + geom_point(size=2,
+                                              aes(color=agn),
+                                              show.legend = F) 
+```
+
+
+Plot the Divisive Results
+```{r}
+
+diaPlot=base + labs(title = "DIANA") + geom_point(size=2,
+                                              aes(color=dia),
+                                              show.legend = F) 
+```
+
+
+Let's look at the visual results
+```{r}
+library(ggpubr)
+ggarrange(agnPlot, diaPlot,ncol = 3)
+```
+
+From the visual plots, the results for both hierarchical clustering methods appear to be pretty consistent.
+
+
+We can label the two hierarchical clustering plots
+```{r}
+library(ggrepel)
+agnPlot + geom_text_repel(size=3,aes(label=Location))
+diaPlot + geom_text_repel(size=3,aes(label=Location))
+```
+
+It looks like there are too many overlaps for the large majority of names to appear. Instead, we will need to try and label anomalies from the agn and dia plots
+
+
+```{r}
+
+LABEL=ifelse(diaEval$sil_width<0, covid$Location,"")
+
+diaPlot + geom_text_repel(aes(label=LABEL))
+
+LABEL=ifelse(agnEval$sil_width<0, covid$Location,"")
+
+agnPlot + geom_text_repel(aes(label=LABEL))
+```
+
+It looks like we still get some overlaps
